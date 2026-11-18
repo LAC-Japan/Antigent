@@ -1,0 +1,39 @@
+{
+  // Antigent (defender) OpenCode config, OpenCode V1 schema ("permission", "mcp.<name>",
+  // "provider"). Runs inside the `antigent` container.
+  // OpenCode is the MCP client; it launches the Defense Gateway (MCP server) over stdio.
+  "$schema": "https://opencode.ai/config.json",
+
+  // OpenCode built-in / free models: no custom provider and no fixed model here.
+  // Pick one once inside OpenCode with /models (or /connect for a provider); the choice is
+  // kept in the opencode-data volume (compose.yaml).
+  // Selected by OPENCODE_CONFIG_FILE=opencode.free.jsonc (the default).
+
+  "mcp": {
+    "antigent": {
+      "type": "local",
+      "command": ["python3", "/antigent/gateway/defense_gateway.py"],
+      "enabled": true
+      // DOCKER_HOST, DEFENSE_LOG, ANTIGENT_SCENARIO and *_CONTAINER come from the container env.
+    }
+  },
+
+  // Antigent acts ONLY through the gateway's tools. v0.16.7: every other built-in tool is denied
+  // too (file reading/search, todo, sub-agents, web/code search, LSP), so a turn cannot wander
+  // into extra LLM steps. "skill" stays allowed: skills are part of the policy.
+  "permission": {
+    "bash": "deny",
+    "edit": "deny",
+    "webfetch": "deny",
+    "read": "deny",
+    "glob": "deny",
+    "grep": "deny",
+    "list": "deny",
+    "todowrite": "deny",
+    "task": "deny",
+    "websearch": "deny",
+    "codesearch": "deny",
+    "lsp": "deny",
+    "skill": "allow"
+  }
+}

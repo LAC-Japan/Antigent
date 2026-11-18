@@ -1,0 +1,22 @@
+# Secrets: model/API keys, AWS and Jenkins credentials.
+.env
+.env.*
+!.env.example
+examples/attacker/.env
+examples/attacker/combined-ca-bundle.pem
+# Run artifacts can contain lab flags, decoy values, and command output.
+runs/
+workspace/
+# Private CA material (ca/ ships documentation only).
+ca/*.pem
+ca/*.crt
+ca/*.key
+# Local build and tooling output.
+__pycache__/
+*.pyc
+.pytest_cache/
+dist/
+*.zip
+# The CI/CD Goat checkout the Quick Start clones into the distribution root.
+/cicd-goat/
+.venv/

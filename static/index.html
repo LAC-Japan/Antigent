@@ -1,0 +1,846 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Antigent Console</title>
+<link rel="icon" href="data:,">
+<style>
+:root {
+  --bg: #070b16;
+  --bg2: #0c1324;
+  --panel: #0f172b;
+  --panel2: #131d36;
+  --line: #22304f;
+  --text: #e6ecf8;
+  --muted: #8a98b8;
+  --antigen: #ff5c7a;          /* attacker = antigen */
+  --antigen-soft: rgba(255, 92, 122, .12);
+  --antibody: #38d9c4;         /* Antigent = antibody */
+  --antibody-soft: rgba(56, 217, 196, .12);
+  --warn: #f4b740;
+  --ok: #5fd38a;
+  --bad: #ff6b6b;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --sans: "Inter", "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background:
+    radial-gradient(1200px 600px at 10% -10%, rgba(255, 92, 122, .08), transparent 60%),
+    radial-gradient(1200px 600px at 90% -10%, rgba(56, 217, 196, .08), transparent 60%),
+    var(--bg);
+  color: var(--text); font: 17px/1.5 var(--sans);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+button { font: inherit; color: inherit; cursor: pointer; }
+
+/* ---------- header ---------- */
+header {
+  display: flex; align-items: center; gap: 18px; padding: 10px 18px;
+  border-bottom: 1px solid var(--line); background: rgba(12, 19, 36, .85); flex-wrap: wrap;
+}
+.brand { display: flex; align-items: center; gap: 10px; }
+.brand h1 { margin: 0; font-size: 30px; letter-spacing: .01em; font-weight: 700; }
+.brand h1 .a { color: var(--antigen); } .brand h1 .b { color: var(--antibody); }
+.brand small { display: block; color: var(--muted); font-size: 14px; letter-spacing: .04em; }
+.meta { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin-left: auto; }
+.kv { display: flex; flex-direction: column; line-height: 1.2; }
+.kv span:first-child { color: var(--muted); font-size: 14px; letter-spacing: .08em; }
+.kv span:last-child { font-family: var(--mono); font-size: 16px; }
+.pills { display: flex; gap: 6px; }
+.pill { border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px; font-size: 15px; display: flex; align-items: center; gap: 6px; }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+.dot.up { background: var(--ok); box-shadow: 0 0 6px var(--ok); } .dot.down { background: var(--bad); }
+.hbtn { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 5px 10px; font-size: 16px; }
+.hbtn:hover { border-color: var(--muted); }
+
+/* ---------- layout ---------- */
+main { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .9fr) minmax(0, 1fr);
+  /* One row that never grows past main: otherwise (notably in Safari) the row takes the feed's
+     content height, the pane overflows the window and the feed's last items cannot be reached. */
+  grid-template-rows: minmax(0, 1fr); gap: 12px; padding: 12px; min-height: 0; overflow: hidden; }
+.pane { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.pane.antigen { border-top: 3px solid var(--antigen); }
+.pane.antibody { border-top: 3px solid var(--antibody); }
+.pane.binding { position: relative; }
+.pane.binding::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px; background: linear-gradient(90deg, var(--antigen), var(--antibody)); }
+.phead { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.phead h2 { margin: 0; font-size: 16px; letter-spacing: .02em; }
+.phead h2 em { font-style: normal; color: var(--muted); letter-spacing: .02em; font-weight: 400; margin-left: 6px; }
+.phead .sp { flex: 1; }
+.feed { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.feed > * { flex: none; }
+.feed::after { content: ""; flex: none; height: 1px; }   /* keeps the bottom padding scrollable in every engine */
+.empty { color: var(--muted); text-align: center; margin: auto; font-size: 16px; max-width: 440px; }
+
+
+/* ---------- command cards (side panes) ---------- */
+.card { border: 1px solid var(--line); border-radius: 10px; background: var(--bg2); overflow: hidden; }
+.foldbatch { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.cmdbatch { --batch-accent: var(--antigen); background: rgba(255, 92, 122, .035); }
+.defbatch { --batch-accent: var(--antibody); background: rgba(56, 217, 196, .025); }
+.foldbatch > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; padding: 8px 10px; font-size: 14px; color: var(--muted); }
+.foldbatch > summary::-webkit-details-marker { display: none; }
+.foldbatch > summary::after { content: "▸"; margin-left: auto; color: var(--batch-accent); font-size: 17px; }
+.foldbatch[open] > summary::after { content: "▾"; }
+.foldbatch .cb-label { color: var(--batch-accent); font-weight: 600; white-space: nowrap; }
+.foldbatch .cb-time, .foldbatch .cb-meta { white-space: nowrap; }
+.foldbatch .cb-body { display: flex; flex-direction: column; gap: 10px; padding: 10px; border-top: 1px solid var(--line); }
+.defbatch > summary { flex-wrap: wrap; }
+.defbatch .cb-meta { white-space: normal; }
+.card.flash { animation: flash 1.2s ease; }
+@keyframes flash { 0% { box-shadow: 0 0 0 2px var(--warn); } 100% { box-shadow: 0 0 0 0 transparent; } }
+.chead { display: flex; align-items: center; gap: 8px; padding: 7px 10px; font-size: 15px; color: var(--muted); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.chead .sp { flex: 1; }
+.cmdline { font-family: var(--mono); font-size: 16px; padding: 8px 10px; white-space: pre-wrap; word-break: break-all; }
+.antigen .cmdline::before { content: "$ "; color: var(--antigen); }
+.antibody .cmdline::before { content: "# "; color: var(--antibody); }
+.out { margin: 0; padding: 8px 10px; font-family: var(--mono); font-size: 15px; white-space: pre-wrap; word-break: break-all;
+  background: #050913; border-top: 1px dashed var(--line); color: #c9d4ea; }
+/* No inner scroll box: a scrollable output inside the scrolling feed captures the wheel/trackpad
+   (macOS latches a gesture to the inner box), so the feed seemed unable to reach its end. Long
+   output is shortened instead, with an explicit "show all". */
+.out .more, .cmdline .more { display: block; margin-top: 6px; font-family: var(--sans); }
+.out.err { color: #ffb4b4; }
+.out.collapsed { display: none; }
+.badge { font-family: var(--mono); font-size: 14px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line); }
+.badge.ok { color: var(--ok); border-color: rgba(95, 211, 138, .4); }
+.badge.bad { color: var(--bad); border-color: rgba(255, 107, 107, .4); }
+.badge.run { color: var(--warn); border-color: rgba(244, 183, 64, .4); }
+.badge.rej { color: var(--muted); text-decoration: line-through; }
+.badge.op { color: var(--warn); }
+.linkbtn { background: none; border: 0; color: var(--muted); font-size: 14px; padding: 0; }
+.linkbtn:hover { color: var(--text); }
+.spin { display: inline-block; width: 10px; height: 10px; border: 2px solid var(--warn); border-right-color: transparent; border-radius: 50%; animation: sp 1s linear infinite; }
+@keyframes sp { to { transform: rotate(360deg); } }
+
+/* records (right pane) */
+.rec { border: 1px solid var(--line); border-left: 3px solid var(--antibody); border-radius: 10px; background: var(--bg2); padding: 8px 10px; }
+.rec.decision { border-left-color: #8f9dff; }
+.rec.decision.noint { border-left-color: var(--muted); }
+.rec > summary { cursor: pointer; list-style: none; display: flex; gap: 8px; align-items: center; font-size: 15px; min-width: 0; }
+.rec > summary::-webkit-details-marker { display: none; }
+.rec > summary .rt { color: var(--muted); white-space: nowrap; }
+.rec > summary .rs { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.rec > summary::after { content: "▸"; margin-left: auto; color: var(--muted); }
+.rec[open] > summary::after { content: "▾"; }
+.rec[open] > summary .rs { white-space: normal; }
+.rec .row { margin-top: 6px; }
+.rec h4 { margin: 0 0 4px; font-size: 15px; color: var(--muted); font-weight: 600; display: flex; gap: 8px; align-items: center; }
+.rec .row { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 2px 8px; font-size: 16px; }
+.rec .row b { color: var(--muted); font-weight: 500; font-size: 15px; }
+.rec .row span { white-space: pre-line; overflow-wrap: anywhere; }
+.num { display: inline-flex; flex: 0 0 24px; width: 24px; min-width: 24px; height: 24px; box-sizing: border-box; line-height: 1; border-radius: 50%; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; color: #04141a; background: var(--antibody); }
+.num.n2 { background: #8f9dff; } .num.n3 { background: #cfd8ea; }
+
+.now { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); background: linear-gradient(180deg, var(--antibody-soft), transparent); }
+.now div { border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px; min-width: 0; }
+.now small { color: var(--muted); font-size: 14px; display: flex; gap: 6px; align-items: center; letter-spacing: .08em; }
+.now p { margin: 2px 0 0; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- center timeline ---------- */
+/* The spine is drawn inside each batch body, so it no longer cuts through the folded
+   batch summaries (it used to span the whole pane and strike through the header text). */
+.tl .defbatch .cb-body { position: relative; }
+.tl .defbatch .cb-body::before { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px;
+  background: linear-gradient(180deg, transparent, var(--line) 6%, var(--line) 94%, transparent); pointer-events: none; z-index: 0; }
+.tl .defbatch .cb-body > * { position: relative; z-index: 1; }
+/* Opaque base under the translucent bubble tints, so the spine does not show through text. */
+.tl .tli.defender .bub { background: linear-gradient(var(--antibody-soft), var(--antibody-soft)), #111a30; }
+.tl .tli.obs .bub { background: linear-gradient(rgba(207, 216, 234, .06), rgba(207, 216, 234, .06)), #111a30; }
+.tl .tli.obs .bub.elevated { background: linear-gradient(rgba(244, 183, 64, .10), rgba(244, 183, 64, .10)), #111a30; }
+.tl .defbatch .cb-body .turnmark span { background: #111a30; }
+/* Pinned (unbatched) Antigent items between batches. */
+#feed-c > .turnmark { padding: 6px 0; }
+#feed-c > .turnmark.trig { color: var(--antibody); }
+.tli { display: flex; position: relative; }
+.tli.attacker { justify-content: flex-start; } .tli.defender { justify-content: flex-end; }
+.bub { max-width: 84%; min-width: 0; border-radius: 14px; padding: 7px 11px 6px; cursor: pointer; position: relative; }
+.attacker .bub { background: var(--antigen-soft); border: 1px solid rgba(255, 92, 122, .35); border-top-left-radius: 4px; }
+.defender .bub { background: var(--antibody-soft); border: 1px solid rgba(56, 217, 196, .35); border-top-right-radius: 4px; }
+.bub:hover { filter: brightness(1.15); }
+.bub code { font-family: var(--mono); font-size: 16px; white-space: pre-wrap; word-break: break-all; display: block; }
+.bub .bm { display: flex; gap: 8px; align-items: center; font-size: 14px; color: var(--muted); margin-bottom: 3px; flex-wrap: wrap; }
+.attacker .bub .who { color: var(--antigen); } .defender .bub .who { color: var(--antibody); }
+.bub.rejected code { text-decoration: line-through; opacity: .6; }
+.turndiv { display: flex; align-items: center; gap: 10px; margin: 14px 0 4px; color: var(--antibody); font-size: 14px; letter-spacing: .14em; font-weight: 600; }
+.turndiv::before, .turndiv::after { content: ""; flex: 1; height: 1px; background: linear-gradient(90deg, transparent, var(--antibody), transparent); opacity: .5; }
+.turnmark { text-align: center; font-size: 14px; color: var(--muted); letter-spacing: .1em; }
+/* v0.14: center = defender view (observed events -> Antigent actions) */
+.tli.obs { justify-content: flex-start; }
+.obs .bub { background: rgba(207, 216, 234, .06); border: 1px solid var(--line); border-top-left-radius: 4px; cursor: default; }
+.obs .bub.elevated { border-color: var(--warn); background: rgba(244, 183, 64, .10); }
+.rec.marker { border-left-color: var(--n3, #7ee0b8); background: rgba(126, 224, 184, .06); }
+.rec.marker h4 { color: var(--n3, #7ee0b8); }
+.rec.marker.fail { opacity: .6; border-style: dashed; background: var(--bg2); }
+.rec.marker.used { border: 1px solid #ffd166; background: rgba(255, 209, 102, .14); box-shadow: 0 0 0 1px rgba(255,209,102,.3); }
+.turnmark.hit { color: #ffd166; font-weight: 700; letter-spacing: .06em; padding: 6px 0; }
+.turnmark.contained { color: var(--antibody); font-weight: 700; letter-spacing: .06em; padding: 6px 0; }
+.turnmark.notcontained { color: var(--antigen); font-weight: 700; letter-spacing: .04em; padding: 6px 0; }
+.tli.markerhit .bub { outline: 2px solid #ffd166; }
+.obs .bub.raw { opacity: .7; padding: 3px 9px; }
+.obs .bub.raw code { font-size: 14px; }
+.obs .bub .who { color: var(--warn); } .obs .bub.raw .who { color: var(--muted); }
+.kind { font-family: var(--mono); font-size: 13px; padding: 0 6px; border-radius: 5px; border: 1px solid var(--line); }
+.elevated .kind { border-color: var(--warn); color: var(--warn); }
+body.hide-raw .obs .bub.raw { display: none; }
+body.hide-raw .defbatch.rawonly { display: none; }
+.pill.phase { color: var(--muted); }
+.pill.phase.learning { color: var(--warn); border-color: rgba(244, 183, 64, .5); }
+.pill.phase.stale { color: var(--antigen); }
+.phead .dvtitle { flex: 1; min-width: 0; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.phead .dvtitle em { font-size: 12px; }
+.phead .hbtn { padding: 2px 10px; font-size: 13px; line-height: 1.4; }   /* keep all pane headers one height */
+.pill[hidden] { display: none; }
+/* The Defender view shows only EXTERNAL-client telemetry, matching Antigent's observation
+   boundary. Internal range-service events remain in the evidence stream but are not displayed. */
+.tli.obs.internal { display: none; }
+.turnmark.trig span { color: var(--antibody); }
+.turnmark.fail span { color: var(--antigen); }
+/* v0.16.3: the T0 briefing is Antigent's own activity -> shown in the Antigent (right) pane. */
+.briefcard { margin: 2px 0 10px; padding: 8px 11px; border-left: 3px solid var(--antibody);
+  background: var(--bg2); border-radius: 6px; color: var(--antibody); font-size: 14px; }
+.briefcard.fail { border-left-color: var(--antigen); color: var(--antigen); }
+.turnmark span { background: var(--panel); padding: 0 8px; position: relative; }
+
+
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-thumb { background: var(--line); border-radius: 9px; }
+@media (max-width: 1100px) {
+  body { overflow: auto; }
+  header { flex: none; }
+  .meta { margin-left: 0; }
+  main { flex: none; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; overflow: visible; }
+  .pane { height: 520px; min-height: 0; }
+  .phead { flex-wrap: wrap; }
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <!-- antibody (Y) binding an antigen (spiked particle) -->
+    <svg width="52" height="52" viewBox="0 0 40 40" aria-hidden="true">
+      <g stroke="#38d9c4" stroke-width="3" stroke-linecap="round" fill="none">
+        <path d="M20 37V22"/><path d="M20 22L11 12"/><path d="M20 22L29 12"/>
+        <path d="M14.5 26L8 18.5" stroke-width="2" opacity=".6"/><path d="M25.5 26L32 18.5" stroke-width="2" opacity=".6"/>
+      </g>
+      <g transform="translate(9 9)">
+        <circle r="4.2" fill="#ff5c7a"/>
+        <g stroke="#ff5c7a" stroke-width="1.6" stroke-linecap="round">
+          <path d="M0-6.5V-8.5"/><path d="M-6.5 0H-8.5"/><path d="M-4.6-4.6L-6-6"/><path d="M4.6-4.6L6-6"/><path d="M-4.6 4.6L-6 6"/>
+        </g>
+      </g>
+    </svg>
+    <div>
+      <h1><span class="a">Anti</span><span class="b">gent</span></h1>
+    </div>
+  </div>
+  <div class="meta">
+    <div class="kv"><span>Scenario</span><span id="h-scn">–</span></div>
+    <div class="kv"><span>Session</span><span id="h-ses">–</span></div>
+    <div class="kv"><span>Elapsed</span><span id="h-el">00:00</span></div>
+    <div class="kv"><span>Turn</span><span id="h-turn">0</span></div>
+    <div class="kv"><span>Cmds A / D</span><span id="h-cnt">0 / 0</span></div>
+    <div class="kv"><span>Events E / R</span><span id="h-ev">0 / 0</span></div>
+    <div class="kv" title="Honeytokens used by the attacker / planted"><span>Decoys ✓ / ●</span><span id="h-decoy">0 / 0</span></div>
+    <span class="pill phase" id="h-phase" hidden></span>
+    <div class="pills" id="h-targets"></div>
+    <button class="hbtn" id="b-export" title="Download this session as JSONL">Export</button>
+    <button class="hbtn" id="b-reset" title="Start a new session">New session</button>
+  </div>
+</header>
+
+<main>
+  <!-- LEFT: attacker (antigen) -->
+  <section class="pane antigen">
+    <div class="phead">
+      <h2 style="color:var(--antigen)">Attacker</h2>
+    </div>
+    <div class="feed" id="feed-a"></div>
+  </section>
+
+  <!-- CENTER: binding timeline -->
+  <section class="pane binding">
+    <div class="phead">
+      <h2 class="dvtitle">Defender view<em id="h-internal" title="Traffic between the lab's own services (e.g. Jenkins polling Gitea, setup scripts). Never shown: it is outside what Antigent watches."></em></h2>
+      <button class="hbtn" id="b-raw" title="raw: low-level requests from EXTERNAL clients (ordinary log lines, no alert). Off = show only notable events.">raw: on</button>
+    </div>
+    <div class="feed tl" id="feed-c"></div>
+  </section>
+
+  <!-- RIGHT: antigent (antibody) -->
+  <section class="pane antibody">
+    <div class="phead">
+      <h2 style="color:var(--antibody)">Antigent</h2>
+    </div>
+    <div class="feed" id="feed-d"></div>
+  </section>
+</main>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+const fmtT = (ts) => new Date(ts * 1000).toLocaleTimeString([], { hour12: false });
+const S = { commands: new Map(), records: [], started: null, turn: 0, ev: { elevated: 0, raw: 0, internal: 0 }, seenObs: new Set(), markers: new Map(), attackBatch: null, attackBatchSeq: 0, defenderBatch: null, defenderBatchSeq: 0, bulkLoading: false };
+const ATTACK_BATCH_GAP_SEC = 2;
+const DEFENDER_BATCH_GAP_SEC = 2;
+
+async function api(path, body) {
+  const r = await fetch(path, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
+  return r.json();
+}
+
+/* ---------- render: side-pane command card ---------- */
+function statusBadge(c) {
+  if (c.status === "rejected") return el("span", "badge rej", "rejected");
+  if (c.status === "running" || c.status === "queued") { const b = el("span", "badge run"); b.append(el("span", "spin"), " running"); return b; }
+  if (c.exit_code == null) return el("span", "badge op", "logged");
+  return el("span", "badge " + (c.exit_code === 0 ? "ok" : "bad"), "exit " + c.exit_code);
+}
+const OUT_HEAD_LINES = 30, OUT_HEAD_CHARS = 3000;   // command output, once shown
+const CMD_HEAD_LINES = 6, CMD_HEAD_CHARS = 600;      // the command itself (heredocs, scripts)
+function foldText(cls, text, maxLines, maxChars, tag = "div") {
+  // Full height, no inner scroll box (it would capture the feed's scrolling); long text starts
+  // folded with an explicit toggle.
+  const box = el(tag, cls);
+  let head = text.split("\n").slice(0, maxLines).join("\n");
+  if (head.length > maxChars) head = head.slice(0, maxChars);
+  if (head.length >= text.length) { box.textContent = text; return box; }
+  const rest = text.slice(head.length), restLines = Math.max(1, rest.split("\n").length - (rest.startsWith("\n") ? 1 : 0));
+  const more = el("button", "linkbtn more");
+  let open = false;
+  const render = () => {
+    box.textContent = open ? text : head;
+    more.textContent = open ? "fold" : "… " + restLines + " more line" + (restLines === 1 ? "" : "s") + " · show all";
+    box.append(more);
+  };
+  more.onclick = (ev) => { ev.stopPropagation(); open = !open; render(); };
+  render();
+  return box;
+}
+function outBlock(cls, text) { return foldText(cls, text, OUT_HEAD_LINES, OUT_HEAD_CHARS, "pre"); }
+function cardFor(c) {
+  const card = el("div", "card"); card.id = "card-" + c.id;
+  const h = el("div", "chead");
+  h.append(el("span", null, (c.side === "attacker" && c.turn ? "#" + c.turn + " · " : c.turn ? "T" + c.turn + " · " : "") + fmtT(c.created)));
+  if (c.via) h.append(el("span", "badge op", "via " + c.via));
+  h.append(el("span", "sp"));
+  if (c.duration != null) h.append(el("span", null, c.duration + "s"));
+  h.append(statusBadge(c));
+  card.append(h);
+  card.append(foldText("cmdline", c.command || "", CMD_HEAD_LINES, CMD_HEAD_CHARS));
+  if (c.status === "done") {
+    const hasOut = (c.stdout || "").length, hasErr = (c.stderr || "").length;
+    const tog = el("div", "chead"); tog.style.borderBottom = "0"; tog.style.borderTop = "1px solid var(--line)";
+    tog.append(el("span", null, "response · " + (hasOut ? hasOut + " B stdout" : "no stdout") + (hasErr ? " · " + hasErr + " B stderr" : "") + (c.truncated ? " · truncated" : "")));
+    tog.append(el("span", "sp"));
+    const tb = el("button", "linkbtn", "show"); tog.append(tb); card.append(tog);
+    const outs = [];
+    if (hasOut) outs.push(outBlock("out", c.stdout));
+    if (hasErr) outs.push(outBlock("out err", c.stderr));
+    if (!hasOut && !hasErr) outs.push(el("pre", "out", "(no output)"));
+    outs.forEach((o) => { o.classList.add("collapsed"); card.append(o); });
+    tb.onclick = () => { const col = !outs[0].classList.contains("collapsed"); outs.forEach((o) => o.classList.toggle("collapsed", col)); tb.textContent = col ? "show" : "hide"; };
+  }
+  return card;
+}
+
+/* ---------- render: right-pane records ---------- */
+function predOf(r) { return Array.isArray(r.predicted_next) ? r.predicted_next.filter((x) => x && typeof x === "object") : []; }
+function preemptText(r) {   // v0.15.3: preempts = number of the predicted step (0 = reactive); older runs: text
+  const p = r.preempts;
+  if (p == null || p === "" || p === 0) return "";
+  if (typeof p === "number" || /^\d+$/.test(String(p))) {
+    const a = S.records.filter((x) => x.kind === "assessment" && x.turn === r.turn).pop();
+    const st = a ? predOf(a)[Number(p) - 1] : null;
+    return "step " + p + (st && st.step ? ": " + st.step : "");
+  }
+  return String(p);
+}
+function recFor(r) {
+  // Collapsed by default: one summary line per record, details on click.
+  const d = el("details", "rec " + r.kind + (r.strategy === "no_intervention" ? " noint" : "")); d.id = "rec-" + r.id;
+  const h = el("summary");
+  h.append(el("span", "num" + (r.kind === "decision" ? " n2" : ""), r.kind === "assessment" ? "1" : "2"));
+  h.append(el("span", "rt", (r.turn ? "T" + r.turn + " · " : "") + fmtT(r.created)));
+  let line;
+  if (r.kind === "assessment") {
+    const pn = predOf(r);
+    line = (r.stage || "?") + (pn[0] ? " → next: " + (pn[0].step || "?") : "")
+      + (r.confidence != null ? " (" + Number(r.confidence).toFixed(2) + ")" : "");
+  } else {
+    const pe = preemptText(r);
+    line = (r.strategy || "?") + (pe ? " ⇢ " + pe : "");
+  }
+  h.append(el("span", "rs", line)); h.title = line;
+  d.append(h);
+  const row = el("div", "row");
+  const add = (k, v) => { if (v !== undefined && v !== null && v !== "") { row.append(el("b", null, k), el("span", null, String(v))); } };
+  if (r.kind === "assessment") {
+    add("intent", r.intent); add("evidence", Array.isArray(r.evidence) ? r.evidence.join(", ") : r.evidence);
+    const pn = predOf(r);
+    if (pn.length) add("predicted next", pn.slice(0, 3).map((x, i) => (i + 1) + ". " + (x.step || "?") + (x.role || x.asset ? " [" + [x.role, x.asset].filter(Boolean).join(": ") + "]" : "") + (x.likelihood != null ? " p=" + Number(x.likelihood).toFixed(2) : "")).join("\n"));
+    else add("next action", r.next_action);
+    add("last prediction", r.previous_prediction);
+  } else {
+    add("pre-empts", preemptText(r)); add("rationale", r.rationale);
+  }
+  d.append(row);
+  return d;
+}
+
+/* ---------- render: timeline bubble ---------- */
+function bubFor(c) {
+  const w = el("div", "tli " + c.side); w.id = "tl-" + c.id;
+  const b = el("div", "bub " + c.status);
+  const m = el("div", "bm");
+  m.append(el("span", "who", c.side === "attacker" ? "Attacker" : "Antigent"));
+  if (c.turn) m.append(el("span", null, "T" + c.turn));
+  m.append(el("span", null, fmtT(c.created)));
+  if (c.status === "rejected") m.append(el("span", "badge rej", "rejected"));
+  else if (c.status === "done" && c.exit_code == null) m.append(el("span", "badge op", "logged"));
+  else if (c.status === "done") m.append(el("span", "badge " + (c.exit_code === 0 ? "ok" : "bad"), "exit " + c.exit_code));
+  else m.append(el("span", "spin"));
+  b.append(m, el("code", null, c.command));
+  b.onclick = () => { const t = document.getElementById("card-" + c.id); if (t) { t.scrollIntoView({ behavior: "smooth", block: "center" }); t.classList.remove("flash"); void t.offsetWidth; t.classList.add("flash"); } };
+  w.append(b); return w;
+}
+
+/* ---------- upsert into DOM ---------- */
+function clearEmpty(feed) { const e = feed.querySelector(".empty"); if (e) e.remove(); }
+function stick(feed, fn) {
+  // Follow the bottom only when the viewer is already there. Otherwise keep the item at the
+  // top of the viewport where it is, even when a batch above it collapses or grows (browsers
+  // without CSS scroll anchoring, e.g. Safari, would otherwise jump).
+  const atBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 60;
+  const prevTop = feed.scrollTop;
+  let anchor = null, before = 0;
+  if (!atBottom) {
+    const top = feed.getBoundingClientRect().top;
+    for (const child of feed.children) {
+      const r = child.getBoundingClientRect();
+      if (r.bottom > top + 1) { anchor = child; before = r.top; break; }
+    }
+  }
+  fn();
+  if (atBottom) feed.scrollTop = feed.scrollHeight;
+  else if (anchor && anchor.isConnected) feed.scrollTop += anchor.getBoundingClientRect().top - before;
+  else feed.scrollTop = prevTop;   // never let an update throw the reader back to the top
+}
+function checkMarkerUse(c) {
+  if (!c || c.side !== "attacker" || !c.command) return;
+  for (const [val, m] of S.markers) {
+    if (m.used || !val || val.length < 6) continue;
+    if (c.command.includes(val)) {
+      m.used = true; m.usedBy = c.id; m.usedAt = c.created;
+      const card = document.getElementById("rec-" + m.id);
+      if (card) { card.classList.add("used"); const h = card.querySelector("h4 span:last-child, summary span:last-child"); }
+      if (!document.getElementById("hit-" + m.id)) {
+        const hit = el("div", "turnmark hit"); hit.id = "hit-" + m.id;
+        hit.append(el("span", null, "✓ HONEYTOKEN TRIGGERED · attacker used decoy " + val + " (on " + (m.role || "?") + ")"));
+        appendDefenderPinned(hit);
+      }
+      const w = document.getElementById("tl-" + c.id); if (w) w.classList.add("markerhit");
+      updateHeader();
+    }
+  }
+}
+function updateAttackBatch(group) {
+  if (!group) return;
+  const commands = [...group.querySelectorAll(".card")].map((card) => S.commands.get(card.id.slice(5))).filter(Boolean);
+  if (!commands.length) return;
+  const done = commands.filter((c) => c.status === "done").length;
+  const failed = commands.filter((c) => c.status === "rejected" || (c.status === "done" && c.exit_code != null && c.exit_code !== 0)).length;
+  const running = commands.filter((c) => c.status !== "done" && c.status !== "rejected").length;
+  const first = commands[0], last = commands[commands.length - 1];
+  const startLabel = fmtT(first.created), endLabel = fmtT(last.created);
+  group.querySelector(".cb-time").textContent = startLabel + (endLabel !== startLabel ? "–" + endLabel : "");
+  group.querySelector(".cb-meta").textContent = commands.length + " command" + (commands.length === 1 ? "" : "s")
+    + " · " + done + "/" + commands.length + " done" + (failed ? " · " + failed + " failed" : "")
+    + (running ? " · " + running + " running" : "");
+}
+function attackBatchParent(c) {
+  let group = S.attackBatch;
+  const lastCreated = group ? Number(group.dataset.lastCreated) : null;
+  if (!group || c.created - lastCreated > ATTACK_BATCH_GAP_SEC) {
+    // Keep the current burst open; older bursts collapse unless the viewer opened them explicitly.
+    if (group && !group.dataset.touched) group.open = false;
+    const seq = ++S.attackBatchSeq;
+    group = el("details", "cmdbatch foldbatch"); group.id = "cmdbatch-" + seq; group.dataset.seq = String(seq); group.open = true;
+    const summary = el("summary");
+    summary.title = "Display-only batch: a gap over 2 seconds starts a new group; not an LLM-step boundary.";
+    summary.addEventListener("click", () => { group.dataset.touched = "1"; });
+    summary.append(el("span", "cb-label", "Batch " + seq), el("span", "cb-time"), el("span", "cb-meta"));
+    group.append(summary, el("div", "cb-body"));
+    $("#feed-a").append(group);
+    S.attackBatch = group;
+  }
+  group.dataset.lastCreated = String(c.created);
+  return group.querySelector(".cb-body");
+}
+function updateDefenderBatch(group) {
+  if (!group) return;
+  const items = [...group.querySelector(".cb-body").children].filter((item) => !item.classList.contains("internal"));
+  const elevated = items.filter((item) => item.classList.contains("obs") && item.querySelector(".bub.elevated")).length;
+  const firstTs = Number(group.dataset.firstTs), lastTs = Number(group.dataset.lastTs);
+  const startLabel = fmtT(firstTs), endLabel = fmtT(lastTs);
+  group.querySelector(".cb-time").textContent = startLabel + (endLabel !== startLabel ? "–" + endLabel : "");
+  // A batch holding only raw telemetry disappears with "raw: off" instead of showing 0 items.
+  group.classList.toggle("rawonly", items.length > 0 && items.every((item) => item.querySelector(".bub.raw")));
+  group.querySelector(".cb-meta").textContent = items.length + " item" + (items.length === 1 ? "" : "s")
+    + (elevated ? " · " + elevated + " elevated" : "");
+}
+function defenderBatchParent(ts) {
+  let group = S.defenderBatch;
+  const lastTs = group ? Number(group.dataset.lastTs) : null;
+  // A pinned item (Antigent turn, Antigent action, honeytoken hit) ends the current batch:
+  // telemetry after it starts a new one, so the pinned item stays between batches.
+  if (!group || S.defenderBatchClosed || ts - lastTs > DEFENDER_BATCH_GAP_SEC) {
+    S.defenderBatchClosed = false;
+    // Collapse older bursts, but preserve any group the viewer explicitly opened or closed.
+    if (group && !group.dataset.touched) group.open = false;
+    const seq = ++S.defenderBatchSeq;
+    group = el("details", "defbatch foldbatch"); group.id = "defbatch-" + seq; group.dataset.seq = String(seq); group.open = true;
+    group.dataset.firstTs = String(ts);
+    const summary = el("summary");
+    summary.title = "Observed telemetry only. A gap over 2 seconds, an Antigent turn, an Antigent action or a honeytoken hit starts a new group.";
+    summary.addEventListener("click", () => { group.dataset.touched = "1"; });
+    summary.append(el("span", "cb-label", "Batch " + seq), el("span", "cb-time"), el("span", "cb-meta"));
+    group.append(summary, el("div", "cb-body"));
+    $("#feed-c").append(group);
+    S.defenderBatch = group;
+  }
+  group.dataset.firstTs = String(Math.min(Number(group.dataset.firstTs), ts));
+  group.dataset.lastTs = String(Math.max(lastTs == null ? ts : lastTs, ts));
+  return group.querySelector(".cb-body");
+}
+function appendDefenderItem(ts, item) {
+  const feed = $("#feed-c");
+  let group = null;
+  stick(feed, () => {
+    clearEmpty(feed);
+    const body = defenderBatchParent(ts); body.append(item);
+    group = body.closest(".defbatch"); updateDefenderBatch(group);
+  });
+  return group;
+}
+function appendDefenderPinned(item) {
+  // Antigent's own activity is never folded into a telemetry batch.
+  const feed = $("#feed-c");
+  stick(feed, () => { clearEmpty(feed); feed.append(item); });
+  S.defenderBatchClosed = true;
+  return item;
+}
+function upsertCommand(c) {
+  if (c.side === "attacker") checkMarkerUse(c);
+  S.commands.set(c.id, c);
+  const side = c.side === "attacker" ? $("#feed-a") : $("#feed-d");
+  stick(side, () => {
+    clearEmpty(side);
+    const old = document.getElementById("card-" + c.id), n = cardFor(c);
+    if (old) {
+      const batch = c.side === "attacker" ? old.closest(".cmdbatch") : null;
+      old.replaceWith(n); updateAttackBatch(batch);
+    } else if (c.side === "attacker") {
+      const body = attackBatchParent(c); body.append(n); updateAttackBatch(body.closest(".cmdbatch"));
+    } else side.append(n);
+  });
+  if (c.side !== "attacker" && S.containments && S.containments.has(c.id)) addContainment(S.containments.get(c.id));
+  // v0.14: the center is the DEFENDER view. Attacker commands stay in the left pane only
+  // (ground truth for the audience); Antigent never sees them.
+  if (c.side !== "attacker") {
+    const old = document.getElementById("tl-" + c.id), n = bubFor(c);
+    if (old) old.replaceWith(n);   // status updates must not move the reader
+    else appendDefenderPinned(n);
+  }
+  updateHeader();
+}
+function obsFor(e) {
+  const w = el("div", "tli obs" + (e.internal ? " internal" : "")); w.id = "ob-" + e.index;
+  const b = el("div", "bub " + (e.level || "raw") + (e.internal ? " internal" : ""));
+  const m = el("div", "bm");
+  m.append(el("span", "who", e.level === "elevated" ? "Observed" : e.internal ? "raw · internal" : "raw"));
+  m.append(el("span", "kind", e.kind || "?"), el("span", null, e.source || ""), el("span", null, fmtT(e.ts)), el("span", null, "#" + e.index));
+  b.append(m, el("code", null, e.summary || ""));
+  w.append(b); return w;
+}
+function addObserved(e) {
+  const key = (e.source || "") + "#" + e.index;
+  if (S.seenObs.has(key)) return;
+  S.seenObs.add(key);
+  if (e.internal) {
+    // Range-internal service traffic (e.g. Jenkins polling Gitea) is outside Antigent's
+    // observation boundary: count it, but never create (empty-looking) batches for it.
+    S.ev.internal++; updateHeader(); return;
+  }
+  S.ev[e.level === "elevated" ? "elevated" : "raw"]++;
+  appendDefenderItem(e.ts, obsFor(e));
+  updateHeader();
+}
+function addTrigger(d) {
+  const id = "tm-" + d.turn;
+  if (d.type === "trigger") {
+    if (document.getElementById(id)) return;
+    if (d.reason === "briefing") {
+      // T0 briefing is Antigent's own activity (studying the environment), not an observed
+      // event -> render it in the Antigent pane, visibly, instead of the shared defender view.
+      const f = $("#feed-d");
+      const t = el("div", "briefcard"); t.id = id;
+      const label = "Antigent briefing (T0) · " + fmtT(d.ts) + " · studying the environment";
+      t.dataset.label = label;
+      t.append(el("span", null, label + " · started"));
+      stick(f, () => { clearEmpty(f); f.append(t); });
+      return;
+    }
+    S.driverTurn = Math.max(S.driverTurn || 0, d.turn || 0); updateHeader();
+    const kinds = Object.entries(d.kinds || {}).map(([k, n]) => k + " ×" + n).join(", ");
+    const t = el("div", "turnmark trig"); t.id = id;
+    const why = kinds || (d.raw ? d.raw + " raw (activity)" : "");
+    const label = "Antigent turn T" + d.turn + " · " + fmtT(d.ts) + (why ? " · " + why : "");
+    t.dataset.label = label;
+    t.append(el("span", null, label + " · started"));
+    appendDefenderPinned(t);
+  } else if (d.type === "turn_retry") {
+    // The driver re-runs the SAME turn number when the agent did not submit; show it on
+    // the existing marker instead of silently ignoring the second trigger.
+    const t = document.getElementById(id); if (!t) return;
+    t.dataset.retry = String(d.retry || 1);
+    t.firstChild.textContent = t.dataset.label + " · retry " + t.dataset.retry + " (previous exit " + d.previous_exit_code + ")";
+  } else if (d.type === "driver_failed") {
+    // Without this the marker stayed at "started" forever when the driver stopped.
+    const t = document.getElementById(id);
+    const text = "Antigent driver stopped at T" + d.turn + " · " + (d.reason || "failed") + " · " + fmtT(d.ts);
+    if (t) { t.firstChild.textContent = (t.dataset.done || t.dataset.label) + " · DRIVER FAILED (" + (d.reason || "?") + ")"; t.classList.add("fail"); }
+    else { const n = el("div", "turnmark fail"); n.id = id; n.dataset.label = text; n.append(el("span", null, text)); appendDefenderPinned(n); }
+  } else {
+    const t = document.getElementById(id); if (!t) return;
+    const pf = d.profile || null;   // v0.16.7: per-turn profile from opencode --format json
+    const tk = pf && pf.tokens ? (pf.tokens.input || 0) + (pf.tokens.output || 0) + (pf.tokens.reasoning || 0) : 0;
+    const label = t.dataset.label || t.firstChild.textContent;
+    const ok = d.exit_code === 0 && d.submitted !== false;
+    const done = label + (t.dataset.retry ? " · retry " + t.dataset.retry : "") + " · "
+      + (d.exit_code !== 0 ? "exit " + d.exit_code : d.submitted === false ? "not submitted" : "done")
+      + (d.duration != null ? " " + d.duration + "s" : "")
+      + (d.intervened ? " · intervened" : "")
+      + (pf && pf.steps ? " · " + pf.steps + " LLM steps" + (tk ? " · " + (tk / 1000).toFixed(1) + "k tok" : "") : "")
+      + (pf && !pf.steps && d.exit_code !== 0 ? " · 0 LLM steps (model call failed; see the antigent-core container log)" : "")
+      + (pf && pf.error_count ? " · " + pf.error_count + " error" + (pf.error_count === 1 ? "" : "s") : "");
+    t.dataset.done = done;
+    t.firstChild.textContent = done;
+    t.classList.toggle("fail", !ok);
+  }
+}
+function markerFor(r) {
+  const d = el("div", "rec marker"); d.id = "rec-" + r.id;
+  const h = el("h4");
+  const failed = r.kind === "marker_failed";
+  if (failed) d.classList.add("fail");
+  h.append(el("span", "num n3", failed ? "◇" : "◆"), el("span", null, (failed ? "Decoy NOT planted (exit " + r.exit_code + ") · " : "Decoy planted · ") + fmtT(r.created) + (r.turn ? " · T" + r.turn : "")));
+  const row = el("div", "row"); row.append(el("b", null, "value"), el("span", null, r.value || ""), el("b", null, "on"), el("span", null, r.role || ""));
+  d.append(h, row); return d;
+}
+function turnDivider(f, turn) {
+  if (turn == null) return;
+  if (document.getElementById("td-" + turn)) return;
+  if ((S.lastDefTurn || 0) === turn && f.querySelector(".turndiv")) return;
+  S.lastDefTurn = turn;
+  const d = el("div", "turndiv"); d.id = "td-" + turn;
+  d.append(el("span", null, "Turn T" + turn));
+  clearEmpty(f); f.append(d);
+}
+function addRecord(r) {
+  const f = $("#feed-d");
+  if (r.kind === "marker" || r.kind === "marker_failed") {   // decoy markers are not decisions
+    if (document.getElementById("rec-" + r.id)) return;
+    S.records.push(r);
+    if (r.kind === "marker" && r.value) { S.markers.set(r.value, { role: r.role, turn: r.turn, used: false, id: r.id }); for (const c of S.commands.values()) if (c.side === "attacker") checkMarkerUse(c); }
+    stick(f, () => { clearEmpty(f); turnDivider(f, r.turn); f.append(markerFor(r)); }); return;
+  }
+  // Idempotent: the same record can come from /api/state and from the event stream.
+  const old = r.id != null ? document.getElementById("rec-" + r.id) : null;
+  if (old) {
+    const i = S.records.findIndex((x) => x.id === r.id); if (i >= 0) S.records[i] = r;
+    const n = recFor(r); n.open = old.open; old.replaceWith(n); return;
+  }
+  S.records.push(r);
+  stick(f, () => { clearEmpty(f); turnDivider(f, r.turn); f.append(recFor(r)); });
+}
+function updateHeader() {
+  let a = 0, d = 0, turn = 0;
+  for (const c of S.commands.values()) { c.side === "attacker" ? a++ : d++; if (c.turn && c.side !== "attacker") turn = Math.max(turn, c.turn); }
+  turn = Math.max(turn, S.driverTurn || 0);   // Antigent (driver) turns, not attacker commands
+  $("#h-cnt").textContent = a + " / " + d; $("#h-turn").textContent = turn;
+  $("#h-ev").textContent = S.ev.elevated + " / " + S.ev.raw;
+  const hi = $("#h-internal"); if (hi) hi.textContent = S.ev.internal ? "· " + S.ev.internal + " internal" : "";
+  const c = S.phase === "learning" ? null : $("#feed-c .empty");
+  if (c) c.textContent = "No external activity observed yet." + (S.ev.internal
+    ? " " + S.ev.internal + " internal service events (range components talking to each other) are hidden." : "");
+  let planted = 0, used = 0; for (const m of S.markers.values()) { planted++; if (m.used) used++; }
+  const hd = $("#h-decoy"); if (hd) hd.textContent = planted ? used + " / " + planted : "0 / 0";
+}
+
+/* ---------- state + SSE ---------- */
+function resetDom() {
+  S.containments = new Map();
+  $("#feed-a").replaceChildren();
+  $("#feed-c").replaceChildren();
+  $("#feed-d").replaceChildren();
+  // Empty-state hints, removed by clearEmpty() when the first item arrives.
+  $("#feed-a").append(el("div", "empty", "No attacker commands yet. This pane shows runs/attacker/attacker.jsonl, "
+    + "written by the Attack Box while its agent runs commands."));
+  $("#feed-c").append(el("div", "empty", "No external activity observed yet."));
+  $("#feed-d").append(el("div", "empty", "No Antigent activity yet."));
+  S.commands.clear(); S.records = []; S.ev = { elevated: 0, raw: 0, internal: 0 }; S.seenObs = new Set(); S.driverTurn = 0; S.markers = new Map(); S.lastDefTurn = 0;
+  S.attackBatch = null; S.attackBatchSeq = 0;
+  S.defenderBatch = null; S.defenderBatchSeq = 0; S.defenderBatchClosed = false;
+}
+/* Replay: "Elapsed" is the span of the recorded run, not time since this Console started. */
+function trackRunSpan(ts) {
+  if (!S.replay || ts == null || !isFinite(ts)) return;
+  S.runFirst = S.runFirst == null ? ts : Math.min(S.runFirst, ts);
+  S.runLast = S.runLast == null ? ts : Math.max(S.runLast, ts);
+}
+function fmtSpan(s) { s = Math.max(0, Math.floor(s)); const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, x = s % 60;
+  return (h ? h + ":" : "") + String(m).padStart(2, "0") + ":" + String(x).padStart(2, "0"); }
+function tickElapsed() {
+  if (S.disconnected) return;
+  if (S.replay) { if (S.runFirst != null) $("#h-el").textContent = fmtSpan(S.runLast - S.runFirst); return; }
+  if (S.started) $("#h-el").textContent = fmtSpan(Date.now() / 1000 - S.started);
+}
+function containmentLabel(o) {
+  const c = S.commands.get(o.action_id) || {};
+  const where = (c.turn ? "T" + c.turn + " · " : "") + (o.surface || "target") + (c.role ? " (on " + c.role + ")" : "");
+  return o.status === "verified"
+    ? "⛔ CONTAINMENT VERIFIED · " + where + " disabled, confirmed by independent readback"
+    : "CONTAINMENT NOT VERIFIED (" + (o.status || "?") + ") · " + where;
+}
+function addContainment(o) {
+  if (!o || !o.action_id) return;
+  const id = "cont-" + o.action_id;
+  const old = document.getElementById(id);
+  if (old) { old.firstChild.textContent = containmentLabel(o); return; }
+  S.containments = S.containments || new Map();
+  S.containments.set(o.action_id, o);
+  const n = el("div", "turnmark " + (o.status === "verified" ? "contained" : "notcontained")); n.id = id;
+  n.append(el("span", null, containmentLabel(o)));
+  appendDefenderPinned(n);
+}
+function applyEvent(ev) {
+  if (ev.type === "command") { trackRunSpan(ev.command && ev.command.created); upsertCommand(ev.command); }
+  else if (ev.type === "record") { trackRunSpan(ev.record && ev.record.created); addRecord(ev.record); }
+  else if (ev.type === "observed") { trackRunSpan(ev.event && ev.event.ts); addObserved(ev.event); }
+  else if (ev.type === "containment") { addContainment(ev.containment); }
+  else if (["trigger", "turn_end", "turn_retry", "driver_failed"].includes(ev.type)) { trackRunSpan(ev.driver && ev.driver.ts); addTrigger(ev.driver); }
+  else if (ev.type === "session") { load(); return; }
+  tickElapsed();
+}
+let loading = null, pending = [];
+async function load() {
+  // Events that arrive while the snapshot is in flight are buffered and applied after it,
+  // so nothing between the snapshot and the stream is lost (all handlers are idempotent).
+  if (loading) return loading;
+  loading = (async () => {
+    pending = [];
+    const st = await api("/api/state");
+    // A reload (stream reconnect, new data) keeps each pane where the reader left it; only the
+    // first load, or a pane that was following the bottom, starts at the latest item.
+    const keep = {};
+    if (S.loadedOnce) for (const f of ["#feed-a", "#feed-c", "#feed-d"]) {
+      const x = $(f); keep[f] = x.scrollHeight - x.scrollTop - x.clientHeight < 60 ? null : x.scrollTop;
+    }
+    resetDom();
+    S.bulkLoading = true;
+    S.replay = !!st.config.replay; S.runFirst = null; S.runLast = null;
+    $("#b-reset").hidden = !!st.config.imported;   // offline review of an export: nothing to reset
+    S.started = st.started;
+    $("#h-ses").textContent = st.session.slice(9); $("#h-scn").textContent = st.config.scenario;
+    const items = [...st.commands.map((c) => ({ t: c.created, c })), ...st.records.map((r) => ({ t: r.created, r })),
+      ...(st.observed || []).map((o) => ({ t: o.ts, o })), ...(st.triggers || []).map((d) => ({ t: d.ts, d })),
+      ...(st.outcomes || []).map((k) => ({ t: k.ts, k }))].sort((x, y) => x.t - y.t);
+    for (const it of items) {
+      trackRunSpan(it.t);
+      it.c ? upsertCommand(it.c) : it.r ? addRecord(it.r) : it.o ? addObserved(it.o) : it.k ? addContainment(it.k) : addTrigger(it.d);
+    }
+    S.bulkLoading = false;
+    for (const f of ["#feed-a", "#feed-c", "#feed-d"]) $(f).scrollTop = keep[f] == null ? $(f).scrollHeight : keep[f];
+    S.loadedOnce = true;
+    updateHeader(); tickElapsed();
+    if (S.lastSensor) showPhase(S.lastSensor);   // panes were just rebuilt
+  })();
+  try { await loading; } finally {
+    loading = null;
+    const queued = pending; pending = [];
+    if (queued.some((ev) => ev.type === "session")) load();   // new session during the snapshot
+    else for (const ev of queued) applyEvent(ev);
+  }
+}
+let es = null;
+function connect() {
+  if (es) es.close();
+  es = new EventSource("/api/events");
+  // Re-sync on every (re)connect: events published while disconnected are not replayed
+  // by the server, so a plain reconnect used to leave permanent gaps in the panes.
+  es.onopen = () => { S.disconnected = false; load(); };
+  es.onmessage = (m) => {
+    let ev; try { ev = JSON.parse(m.data); } catch (_) { return; }
+    if (loading) { pending.push(ev); return; }
+    applyEvent(ev);
+  };
+  es.onerror = () => {
+    // Server gone (e.g. `docker compose down`): say so and stop the clock, instead of a
+    // frozen page whose Elapsed keeps counting as if the run were still going.
+    S.disconnected = true;
+    const box = $("#h-phase");
+    if (box) { box.textContent = "console disconnected"; box.className = "pill phase stale"; box.hidden = false; }
+    if (es.readyState === EventSource.CLOSED) setTimeout(connect, 2000);
+  };
+}
+function showPhase(sn) {
+  // Tell the operator what is happening while the panes are legitimately empty.
+  const p = (sn && sn.phase) || "off";
+  S.phase = p; S.lastSensor = sn;
+  const txt = {
+    starting: "sensor starting",
+    stale: "sensor not responding",
+    learning: "learning baseline " + Math.round(sn.elapsed_sec || 0) + " / " + Math.round(sn.duration_sec || 0) + " s",
+    watching: "watching",
+  }[p];
+  const box = $("#h-phase");
+  if (box) { box.textContent = txt || ""; box.className = "pill phase " + p; box.hidden = !txt; }
+  const c = $("#feed-c .empty");
+  if (c && p === "learning") c.textContent = "Learning the baseline (" + Math.round(sn.elapsed_sec || 0) + " / "
+    + Math.round(sn.duration_sec || 0) + " s). Activity in this window is recorded as normal and not shown here.";
+  else if (c && p === "starting") c.textContent = "Waiting for the sensor to start.";
+  else if (c && p === "stale") c.textContent = "The sensor has stopped writing status (is the antigent container running?).";
+  else if (c && p === "watching") updateHeader();
+  const a = $("#feed-a .empty");
+  if (a && (p === "learning" || p === "starting")) a.textContent = "No attacker commands yet. The Attack Box starts after the "
+    + "baseline; its first build can take several minutes.";
+}
+async function health() {
+  if (S.disconnected) return;
+  try {
+    const h = await api("/api/health");
+    const ts = Array.isArray(h) ? h : (h.targets || []);
+    showPhase(h.sensor);
+    const box = $("#h-targets"); box.replaceChildren();
+    for (const t of ts) { const p = el("span", "pill"); p.title = (t.container || "") + (t.status ? " → " + t.status : ""); p.append(el("span", "dot " + (t.up ? "up" : "down")), t.name); box.append(p); }
+  } catch (e) { /* server down */ }
+}
+setInterval(tickElapsed, 1000);
+setInterval(health, 5000);
+
+/* ---------- controls ---------- */
+$("#b-raw").onclick = (e) => { const hide = document.body.classList.toggle("hide-raw"); e.target.textContent = hide ? "raw: off" : "raw: on"; try { localStorage.setItem("antigent-hide-raw", hide ? "1" : "0"); } catch (_) {} };
+try { if (localStorage.getItem("antigent-hide-raw") === "1") { document.body.classList.add("hide-raw"); $("#b-raw").textContent = "raw: off"; } } catch (_) {}
+$("#b-export").onclick = () => { location.href = "/api/export"; };
+$("#b-reset").onclick = async () => { if (confirm("Start a new session? The current log stays in runs/.")) await api("/api/reset", {}); };
+
+connect();   // onopen performs the initial load()
+health();
+</script>
+</body>
+</html>

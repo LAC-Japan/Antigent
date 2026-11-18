@@ -1,0 +1,15 @@
+[project]
+name = "antigent-defense-plane"
+version = "0.1.0"
+description = "Antigent Defense Plane - Autonomous counter-agent for authorized isolated labs"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+# Standard library only: no runtime or development dependencies.
+# Tests: python -m unittest discover -s tests
+dependencies = []
+
+[tool.uv]
+# Scripts in this repository are run in place (uv run python live_demo.py ...);
+# nothing is built or installed, so no build backend is downloaded.
+package = false

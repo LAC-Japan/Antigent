@@ -1,0 +1,5 @@
+{"ts": 1800000010.0, "event": "start", "id": "a1", "command": "curl -s $GITEA/api/v1/repos/search", "via": "exec"}
+{"ts": 1800000011.0, "event": "end", "id": "a1", "exit_code": 0}
+{"ts": 1800000020.0, "event": "cmd", "id": "a2", "command": "hydra -l admin -P pw.txt $GITEA", "exit_code": 0}
+{"ts": 1800000070.0, "event": "cmd", "id": "a3", "command": "cat /var/jenkins_home/.aws/credentials", "exit_code": 0}
+{"ts": 1800000080.0, "event": "cmd", "id": "a4", "command": "aws --key AKIASAMPLEDECOY sts get-caller-identity", "exit_code": 255}

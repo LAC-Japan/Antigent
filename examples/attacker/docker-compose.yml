@@ -1,0 +1,123 @@
+# SPDX-License-Identifier: Apache-2.0
+# Public, target-agnostic Attack Box sample for an explicitly authorized lab.
+#
+# Network boundary (enforced by Docker, not by the agent's instructions):
+#   lab     internal network WITHOUT a host-side address (inhibit_ipv4). No default route,
+#           no external DNS, and no address of the Docker host is reachable from it.
+#           Target containers are attached to it explicitly (see README / live_demo.py):
+#             docker network connect antigent-attack-lab <target-container>
+#   egress  ordinary bridge used ONLY by egress-proxy.
+# The Attack Box joins only `lab`. Its single way out is egress-proxy, which tunnels HTTPS
+# (CONNECT) to the allow-listed LLM API hosts and refuses everything else (web search,
+# plain HTTP, other hosts, IP literals, private/metadata addresses). Decisions are logged
+# to runs/egress/egress.jsonl, outside the Attack Box's writable log directory.
+name: antigent-attackbox-sample
+
+services:
+  egress-proxy:
+    build:
+      context: ../../egress
+    image: antigent-egress-proxy:0.1.0
+    user: "0:0"            # writes runs/egress (a root-owned bind mount); no capabilities
+    cap_drop: [ALL]
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - lab
+      - egress
+    volumes:
+      - ../../runs/egress:/var/log/egress
+    environment:
+      # Comma list: exact host, ".suffix", or host:port. Set by live_demo.py from the
+      # selected attacker model; the default covers OpenCode's built-in (Zen) models only.
+      EGRESS_ALLOW: ${ATTACKER_EGRESS_ALLOW:-opencode.ai}
+      # Only for a self-hosted lab LLM whose name resolves to a private address.
+      EGRESS_ALLOW_PRIVATE: ${ATTACKER_EGRESS_ALLOW_PRIVATE:-}
+      EGRESS_LOG: /var/log/egress/egress.jsonl
+      # Corporate proxy, if the host can only reach the Internet through one.
+      EGRESS_UPSTREAM_PROXY: ${ATTACKER_EGRESS_UPSTREAM_PROXY:-}
+    restart: unless-stopped
+
+  attackbox:
+    build:
+      context: ../../attackbox
+      additional_contexts:
+        ca: ${ATTACKER_CA_CONTEXT:-../../ca}
+      args:
+        OPENCODE_VERSION: ${OPENCODE_VERSION:-2.3.0}
+        GITLEAKS_VERSION: ${GITLEAKS_VERSION:-8.21.2}
+        TRUFFLEHOG_VERSION: ${TRUFFLEHOG_VERSION:-3.88.0}
+    image: antigent-attackbox-sample:0.1.0
+    hostname: attackbox
+    init: true
+    depends_on: [egress-proxy]
+    networks:
+      - lab
+    volumes:
+      - ../../runs/attacker:/var/log/attackbox
+      - ./AGENTS.md:/home/attacker/work/AGENTS.md:ro
+      - ./opencode.free.jsonc:/home/attacker/work/opencode.free.jsonc:ro
+      - ./opencode.lab.jsonc:/home/attacker/work/opencode.lab.jsonc:ro
+      - opencode-data:/home/attacker/.local/share/opencode
+      - opencode-config:/home/attacker/.config/opencode
+      # Optional runtime TLS-inspection bundle. Also set CA_BUNDLE_PATH in .env.
+      # - ./combined-ca-bundle.pem:/etc/attackbox/ca/combined-ca-bundle.pem:ro
+    working_dir: /home/attacker/work
+    # Only what OpenCode needs is injected. Each credential is the ATTACKER's own (never
+    # the defender's) and is visible to every command the agent runs, so use a dedicated,
+    # low-limit, short-lived key. Unset values stay empty.
+    environment:
+      AUTHORIZED_TARGETS: ${AUTHORIZED_TARGETS:-}
+      OPENCODE_CONFIG: /home/attacker/work/${ATTACKER_OPENCODE_CONFIG:-opencode.free.jsonc}
+      OPENCODE_DISABLE_AUTOUPDATE: "1"
+      # The model catalog (models.opencode.ai) is not on the egress allowlist; skip the fetch
+      # and use the catalog bundled with the pinned OpenCode release instead of retrying it.
+      OPENCODE_DISABLE_MODELS_FETCH: "1"
+      HTTPS_PROXY: http://egress-proxy:3128
+      HTTP_PROXY: http://egress-proxy:3128
+      https_proxy: http://egress-proxy:3128
+      http_proxy: http://egress-proxy:3128
+      # Loopback is required by OpenCode (CLI <-> local service); targets are reached directly.
+      NO_PROXY: localhost,127.0.0.1,::1,${AUTHORIZED_TARGETS:-}
+      no_proxy: localhost,127.0.0.1,::1,${AUTHORIZED_TARGETS:-}
+      LLM_BASE_URL: ${ATTACKER_LLM_BASE_URL:-}
+      LLM_API_KEY: ${ATTACKER_LLM_API_KEY:-}
+      LLM_MODEL_ID: ${ATTACKER_LLM_MODEL_ID:-}
+      # AWS Bedrock (native opencode provider, for amazon-bedrock/* models). Prefer the
+      # short-lived bearer token; live_demo.py never passes both forms.
+      AWS_REGION: ${ATTACKER_AWS_REGION:-}
+      AWS_BEARER_TOKEN_BEDROCK: ${ATTACKER_AWS_BEARER_TOKEN_BEDROCK:-}
+      AWS_ACCESS_KEY_ID: ${ATTACKER_AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${ATTACKER_AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${ATTACKER_AWS_SESSION_TOKEN:-}
+      # The default uses the container's public roots. All variables point to the
+      # same optional combined bundle when CA_BUNDLE_PATH is overridden.
+      SSL_CERT_FILE: ${CA_BUNDLE_PATH:-/etc/ssl/certs/ca-certificates.crt}
+      REQUESTS_CA_BUNDLE: ${CA_BUNDLE_PATH:-/etc/ssl/certs/ca-certificates.crt}
+      CURL_CA_BUNDLE: ${CA_BUNDLE_PATH:-/etc/ssl/certs/ca-certificates.crt}
+      GIT_SSL_CAINFO: ${CA_BUNDLE_PATH:-/etc/ssl/certs/ca-certificates.crt}
+      NODE_EXTRA_CA_CERTS: ${CA_BUNDLE_PATH:-/etc/ssl/certs/ca-certificates.crt}
+    # The entrypoint only fixes ownership/modes of its log and home directories.
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER]
+    pids_limit: 1024
+    security_opt:
+      - no-new-privileges:true
+    # No published ports, SSH server, Docker socket, host gateway, or defense network.
+
+networks:
+  lab:
+    name: antigent-attack-lab
+    internal: true
+    driver: bridge
+    driver_opts:
+      # No address on the host side of the bridge: the Docker host's services (and the
+      # other bridges' gateways) are unreachable. `internal` alone still allows that.
+      com.docker.network.bridge.inhibit_ipv4: "true"
+  egress:
+    name: antigent-attack-egress
+
+volumes:
+  opencode-data:
+  opencode-config:

@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: Apache-2.0
+{
+  "$schema": "https://opencode.ai/config.json",
+
+  // Select a built-in/free model interactively with /models. Shell access stays
+  // inside this Attack Box and is recorded by /etc/attackbox/cmdlog.sh.
+  "permission": {
+    "bash": "allow",
+    "edit": "allow",
+    "webfetch": "deny",
+    "websearch": "deny"
+  }
+}

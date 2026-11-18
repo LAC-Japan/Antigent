@@ -1,0 +1,150 @@
+# Antigent demo compose (CI/CD Goat Caterpillar). Started by live_demo.py.
+#
+# Usage:
+#   cp .env.example .env
+#   uv run python live_demo.py run
+#
+name: antigent-demo
+
+services:
+  # Docker API guard (the only holder of docker.sock). Allows ps/inspect/logs/diff and
+  # exec into the declared target containers; refuses create/kill/rm/cp/images/networks,
+  # privileged exec, and exec into privileged, socket-mounting or antigent-* containers.
+  # Reachable only from `antigent` on the internal docker-api network.
+  socket-proxy:
+    build:
+      context: ./apiguard
+    image: antigent-api-guard:0.1.0
+    container_name: antigent-socket-proxy
+    user: "0:0"
+    cap_drop: [ALL]
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - docker-api
+    environment:
+      GUARD_ALLOW_FROM: antigent
+      GUARD_EXEC_CONTAINERS: "${GITEA_CONTAINER:-gitea}"   # the only container a typed operation execs into
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: unless-stopped
+
+  # Defense agent: sensor + event driver + Defense Gateway
+  antigent:
+    build:
+      context: .
+      dockerfile: antigent/Dockerfile
+      additional_contexts:
+        ca: ${ANTIGENT_CA_CONTEXT:-./ca}
+      args:
+        OPENCODE_VERSION: ${OPENCODE_VERSION:-2.3.0}
+    image: antigent-defense:demo
+    container_name: antigent-core          # Antigent itself: sensor, driver, OpenCode, gateway
+    depends_on: [socket-proxy]
+    networks:
+      - default
+      - docker-api
+    volumes:
+      - ./runs/${DEMO_RUN_ID:-demo}/defense:/antigent/runs/defense
+      - opencode-data:/root/.local/share/opencode
+      - opencode-config:/root/.config/opencode
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      DOCKER_HOST: tcp://socket-proxy:2375
+      DEFENSE_LOG: /antigent/runs/defense/defense.jsonl
+      SENSOR_STREAM: /antigent/runs/defense/sensor.jsonl
+      SENSOR_INTERVAL: "1"
+      ANTIGENT_DRIVER: "1"
+      ANTIGENT_WARMUP: "1"
+      ANTIGENT_WARMUP_TIMEOUT: "120"
+      ANTIGENT_MODEL: ${ANTIGENT_MODEL:-}
+      ANTIGENT_SCENARIO: /antigent/scenarios/cicd-goat
+      DRIVER_TURN_TIMEOUT: "300"
+      DRIVER_REOBSERVE_TIMEOUT: "120"
+      # netsensor flows (written by the netsensor service into the same run directory)
+      NET_STREAM: /antigent/runs/defense/net/flows.jsonl
+      ANTIGENT_HOST_ADDRESSES: ${ANTIGENT_HOST_ADDRESSES:-}   # optional, see .env.example
+      ANTIGENT_SELF_MARK: ${ANTIGENT_SELF_MARK:-}   # per-run random value set by live_demo.py
+      NET_DUP: skip                # no net-http events where the role's access log names clients
+      NET_KEEP_INTERNAL: "0"
+      # Role->container mapping for CI/CD Goat Caterpillar
+      GITEA_CONTAINER: ${GITEA_CONTAINER:-gitea}
+      JENKINS_CONTAINER: ${JENKINS_CONTAINER:-jenkins-server}
+      PROD_CONTAINER: ${PROD_CONTAINER:-prod}
+      # OpenCode config (free by default)
+      OPENCODE_CONFIG: /antigent/${OPENCODE_CONFIG_FILE:-opencode.free.jsonc}
+      # Own OpenAI-compatible endpoint (used by opencode.lab.jsonc)
+      LLM_BASE_URL: ${ANTIGENT_LLM_BASE_URL:-}
+      LLM_API_KEY: ${ANTIGENT_LLM_API_KEY:-}
+      LLM_MODEL_ID: ${ANTIGENT_LLM_MODEL_ID:-}
+      ANTIGENT_MODEL_LABEL: ${ANTIGENT_MODEL_LABEL:-}
+      # AWS Bedrock (native opencode provider, for amazon-bedrock/* models)
+      AWS_REGION: ${ANTIGENT_AWS_REGION:-}
+      AWS_ACCESS_KEY_ID: ${ANTIGENT_AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${ANTIGENT_AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${ANTIGENT_AWS_SESSION_TOKEN:-}
+      AWS_BEARER_TOKEN_BEDROCK: ${ANTIGENT_AWS_BEARER_TOKEN_BEDROCK:-}
+      # Jenkins credential for containment
+      ANTIGENT_JENKINS_URL: ${ANTIGENT_JENKINS_URL:-}
+      ANTIGENT_JENKINS_ADMIN_USER: ${ANTIGENT_JENKINS_ADMIN_USER:-}
+      ANTIGENT_JENKINS_ADMIN_PASSWORD: ${ANTIGENT_JENKINS_ADMIN_PASSWORD:-}
+    restart: unless-stopped
+
+  # Network tap on the Docker bridges (incl. the Attack Box's lab network): HTTP requests and
+  # TCP connections to targets that keep no access log. No Docker API; capture only.
+  netsensor:
+    image: antigent-defense:demo
+    container_name: antigent-netsensor
+    depends_on: [antigent]       # same image; built by the antigent service
+    network_mode: host           # the Docker host's (Docker Desktop: the Linux VM's) interfaces
+    cap_drop: [ALL]
+    cap_add: [NET_RAW]           # raw packet capture only
+    security_opt:
+      - no-new-privileges:true
+    entrypoint: ["python3", "/antigent/gateway/netsensor.py"]
+    volumes:
+      - ./runs/${DEMO_RUN_ID:-demo}/defense/net:/antigent/runs/defense/net
+    environment:
+      NET_OUT: /antigent/runs/defense/net/flows.jsonl
+      NET_IFACES: ${NET_IFACES:-^(docker0|br-.*)$$}
+      NET_PROMISC: ${NET_PROMISC:-1}
+    restart: unless-stopped
+
+  # Console: viewer-only web UI
+  console:
+    build:
+      context: .
+      dockerfile: console/Dockerfile
+    image: antigent-console:demo
+    container_name: antigent-console
+    ports:
+      - "${CONSOLE_BIND:-127.0.0.1}:${CONSOLE_PORT:-8765}:8765"
+    volumes:
+      - ./runs:/console/runs
+    environment:
+      ANTIGENT_SCENARIO: /console/scenarios/cicd-goat
+      ANTIGENT_RUN_DIR: /console/runs/${DEMO_RUN_ID:-demo}
+      # Host names the browser may use besides 127.0.0.1/localhost (DNS-rebinding guard)
+      ANTIGENT_ALLOWED_HOSTS: ${CONSOLE_ALLOWED_HOSTS:-}
+      # The attackbox sample writes its command log at runs/attacker/ (top level),
+      # outside the console's run dir; bind the Attacker pane/export to that path.
+      ANTIGENT_ATTACKER_LOG: /console/runs/attacker/attacker.jsonl
+      ANTIGENT_REPLAY: "0"
+    restart: unless-stopped
+
+networks:
+  # Internal, and without a host-side address: only `antigent` and the guard are on it, so
+  # neither the Console, the netsensor, nor a process on the Docker host can reach port 2375.
+  docker-api:
+    internal: true
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.inhibit_ipv4: "true"
+  # antigent's own LLM traffic and the Console's localhost publish.
+  default:
+
+volumes:
+  opencode-data:
+  opencode-config:

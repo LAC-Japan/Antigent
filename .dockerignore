@@ -1,0 +1,13 @@
+# Keep event logs, research files and the attacker example out of every image.
+runs/
+dist/
+fixtures/
+tests/
+examples/
+attackbox/
+tools/
+docs/
+*.zip
+*.png
+**/__pycache__
+.env

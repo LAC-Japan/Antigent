@@ -1,0 +1,141 @@
+{
+  "_comment": "Scenario Adapter for cicd-goat. Everything target-specific lives in this folder; the Antigent core (gateway, console, AGENTS.md, skills) is scenario-agnostic. To defend another target, copy this folder, edit it, and point ANTIGENT_SCENARIO at it.",
+  "name": "cicd-goat",
+  "description": "CI/CD range: Gitea (source + CI config), Jenkins (pipelines, credentials), prod (deploy target).",
+  "roles": {
+    "gitea": {
+      "container": "${GITEA_CONTAINER:-gitea}",
+      "description": "Gitea source server hosting the repositories and their CI configuration.",
+      "sensors": [
+        {
+          "type": "docker_logs",
+          "kind": "access-log"
+        }
+      ],
+      "exec": true
+    },
+    "jenkins": {
+      "container": "${JENKINS_CONTAINER:-jenkins-server}",
+      "description": "Jenkins controller. Pipelines, stored credentials, script console.",
+      "sensors": [
+        {
+          "type": "docker_logs",
+          "kind": "build-log",
+          "internal": true,
+          "_note": "internal: true -> Jenkins' own build/branch-indexing logs are the service's operation, not client traffic. surface: builds of pull requests run code submitted from outside the organisation, so their start and finish are shown as `pipeline-run` (with the exact job) and start a turn.",
+          "surface": [
+            {
+              "pattern": "Notifying pull request pending build (?P<job>[\\w.-]+/PR-\\d+)\\b",
+              "kind": "pipeline-run"
+            },
+            {
+              "pattern": "WorkflowRun#finish: (?P<job>[\\w.-]+/PR-\\d+) #(?P<build>\\d+) completed: (?P<result>\\w+)",
+              "kind": "pipeline-run"
+            }
+          ]
+        }
+      ],
+      "exec": true
+    },
+    "prod": {
+      "container": "${PROD_CONTAINER:-prod}",
+      "description": "Deploy target reached by pipelines (SSH). Filesystem changes appear as fs-change events.",
+      "sensors": [
+        {
+          "type": "docker_diff",
+          "kind": "fs-change",
+          "ignore": [
+            "^/(run|var/run|proc|sys|dev)(/|$)",
+            "^/var/(cache|lib/apk)(/|$)"
+          ]
+        }
+      ],
+      "exec": false
+    }
+  },
+  "baseline": {
+    "_comment": "Attacker-free calibration for a fresh defense state. During duration_sec, repeated ordinary telemetry is learned only when the same source/kind and all declared attributes match at least min_count times over min_span_sec. Matching later events stay level=baseline and never feed new-source, burst, or activity triggers. Authentication, filesystem changes, new paths, and other undeclared kinds are never learned. Start only while the target is attacker-free; the profile is stored as sensor.baseline.json and reused on restart.",
+    "duration_sec": 60,
+    "min_count": 2,
+    "min_span_sec": 20,
+    "learn": {
+      "access-log": [
+        "client",
+        "method",
+        "path"
+      ],
+      "net-http": [
+        "client",
+        "method",
+        "path"
+      ],
+      "net-conn": [
+        "client",
+        "dport"
+      ]
+    }
+  },
+  "log_rules": {
+    "_comment": "Regexes applied to docker_logs lines. auth_fail lines are aggregated into auth-burst / auth-failure events (named groups: ip, user, path). Verified on gitea/gitea:1.22 and jenkins/jenkins:lts-jdk17. ANSI colour codes are stripped before matching. Gitea 1.2x default router log: 'Started GET <path> for <ip>:<port>' + 'Completed GET <path> <status> ...' (status lines get the address of the latest Started line for the same path).",
+    "auth_fail": [
+      "Failed authentication attempt for (?P<user>\\S+) from (?P<ip>[0-9a-fA-F.:\\[\\]]+?)(?::\\d+)?:",
+      "router: completed \\w+ (?P<path>\\S+) for (?P<ip>[0-9a-fA-F.:\\[\\]]+?):\\d+, 401 ",
+      "failed to authenticate: (?P<user>\\S+)",
+      "(?P<jlogin>Login attempt failed)",
+      "Failed password for (?:invalid user )?(?P<user>\\S+) from (?P<ip>[0-9a-fA-F.:]+)"
+    ],
+    "auth_dup": [
+      "UserSignIn: user's password is invalid \\[uid: \\d+, name: (?P<user>[^\\]]+)\\]",
+      "Failed to verify user: .*name: (?P<user>[^\\]]+)\\]"
+    ],
+    "client": [
+      "router: completed (?P<method>\\w+) (?P<path>\\S+) for (?P<ip>[0-9a-fA-F.:\\[\\]]+?):\\d+, (?P<status>\\d{3})",
+      "Started (?P<method>\\w+) (?P<path>\\S+) for (?P<ip>[0-9a-fA-F.:\\[\\]]+?):\\d+\\s*$"
+    ],
+    "status": [
+      "Completed (?P<method>\\w+) (?P<path>\\S+) (?P<status>\\d{3}) "
+    ],
+    "quiet": [
+      "\\bStarted \\w+ \\S+ for [0-9a-fA-F.:\\[\\]]+:\\d+\\s*$"
+    ],
+    "noise": [
+      "^\\s*at [\\w.$]+\\(",
+      "^\\w{3} \\d{1,2}, \\d{4} \\d{1,2}:\\d{2}:\\d{2} [AP]M ",
+      "^\\s*\\.\\.\\. \\d+ more$"
+    ]
+  },
+  "request_rules": [
+    {
+      "_comment": "Gitea: an outside client reading repository content. `target` (named group) = the repository; one event per client and repository.",
+      "kind": "repo-read",
+      "label": "repository clone/fetch",
+      "path": "^/(?P<target>[^/]+/[^/]+?)\\.git/(info/refs\\?service=git-upload-pack|git-upload-pack)"
+    },
+    {
+      "kind": "repo-read",
+      "label": "repository file read",
+      "path": "^/(?:api/v1/repos/)?(?P<target>[^/]+/[^/]+)/(contents|raw|media)/"
+    }
+  ],
+  "internal": {
+    "_comment": "Clients that are the target's own services: never new-source / recon-burst / error-burst (still logged raw). same_project = all containers of the role containers' compose project (cicd-goat: jenkins-server, jenkins-agent, gitlab, gitlab-runner, localstack, docker, ctfd, ...; confirmed 2026-11-15 that jenkins-server's multibranch scans of Gitea looked like recon). ips = extra fixed addresses. The core has no default: without this block every client is watched.",
+    "same_project": true,
+    "ips": []
+  },
+  "triggers": {
+    "_comment": "Event kinds that are 'elevated' and start an Antigent turn at once (driver). new-source = first request from a client address on a role; recon-burst / error-burst = many requests / many 4xx from one address (log_rules.client with ip/status). Ordinary raw activity also starts a turn, but batched (DRIVER_ACTIVITY_INTERVAL).",
+    "kinds": [
+      "auth-burst",
+      "auth-failure",
+      "fs-change",
+      "new-source",
+      "recon-burst",
+      "error-burst",
+      "pipeline-run",
+      "repo-read"
+    ]
+  },
+  "console": {
+    "label": "cicd-goat"
+  }
+}

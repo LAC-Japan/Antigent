@@ -1,0 +1,7 @@
+Antigent
+Copyright 2026 LAC Co., Ltd.
+
+This distribution contains the Antigent Defense Plane, its CI/CD Goat
+Scenario Adapter, and an optional Attack Box sample. The target application,
+third-party container images, and third-party tools are not bundled. Those
+external components remain subject to their respective licenses and notices.
